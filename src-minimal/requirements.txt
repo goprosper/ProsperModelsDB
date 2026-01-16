@@ -1,0 +1,2 @@
+# boto3 and botocore are available in Lambda runtime by default
+# Only include if specific versions are required

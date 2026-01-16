@@ -1,0 +1,16 @@
+aws cognito-idp initiate-auth `
+  --region us-east-1 `
+  --client-id 4cqa59h596ojh3j1bsaek1tlqg `
+  --auth-flow USER_PASSWORD_AUTH `
+  --auth-parameters USERNAME="mike@goprosper.com",PASSWORD="L0w_L3v31"
+
+aws cognito-idp admin-set-user-password `
+  --user-pool-id us-east-1_LKTqOzWU4 `
+  --username mike@goprosper.com `
+  --password "L0w_L3v31" `
+  --permanent
+
+
+Id, SubmissionDateTime, ShortDescription, StudyName, FeatureListName, Label, Status, ErrorMessage, BestCandidateMetrics, AutoMLJobName
+
+We are trying to solve the recurring deployment problem. Please make a task list of things to try to diagnose this problem.  Do not make assumptions, try to create a tests that will prove facts or behaviors.  As you execute each task, note the results and do not repeat the task again unless you discover something new and change the task.

@@ -1,0 +1,36 @@
+# Python virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Test files
+test_*.py
+*_test.py
+tests/
+.pytest_cache/
+
+# Development files
+.git/
+.gitignore
+.DS_Store
+*.egg-info/
+.coverage
+.tox/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Documentation
+*.md
+docs/

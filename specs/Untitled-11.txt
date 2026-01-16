@@ -1,0 +1,56 @@
+curl -X POST \
+  https://xiasqsq8fj.execute-api.us-east-1.amazonaws.com/prod/start-workflow \
+  -H "Authorization: Bearer eyJraWQiOiJKMDlxbjJEbTVOVmRoTlNnZ3ltc08yRGJucm9pbEUxNVZzdmNNczk3SldBPSIsImFsZyI6IlJTMjU2In0.eyJzdWIiOiI0NGU4ZjQ5OC0xMDAxLTcwNzUtMGZlNi0wNmY4NzJkOWIyNDUiLCJpc3MiOiJodHRwczpcL1wvY29nbml0by1pZHAudXMtZWFzdC0xLmFtYXpvbmF3cy5jb21cL3VzLWVhc3QtMV9MS1RxT3pXVTQiLCJjbGllbnRfaWQiOiI0Y3FhNTloNTk2b2poM2oxYnNhZWsxdGxxZyIsIm9yaWdpbl9qdGkiOiI3OTEzMDYxMy0zYWZiLTRlYjYtOGM5YS0xOTNmYWZlNmU1MGUiLCJldmVudF9pZCI6IjI3NDQyNmE0LTU4MDYtNDBlYy04OTgzLTcxMTU4ZWJjMjYyNCIsInRva2VuX3VzZSI6ImFjY2VzcyIsInNjb3BlIjoiYXdzLmNvZ25pdG8uc2lnbmluLnVzZXIuYWRtaW4iLCJhdXRoX3RpbWUiOjE3NjY2Njc3NTksImV4cCI6MTc2NjY3MTM1OSwiaWF0IjoxNzY2NjY3NzU5LCJqdGkiOiI3OTkzYjMzNS01YzU5LTRlYWItYTI0NC00YTFlNjUwZTY3YzQiLCJ1c2VybmFtZSI6IjQ0ZThmNDk4LTEwMDEtNzA3NS0wZmU2LTA2Zjg3MmQ5YjI0NSJ9.PvyvHpode3VrFkCTJtFHNYSHLa-yFLhaEr5bgOJLBKSZoTkRjAICiBlAQeFP9NRkY2yxh43vJwo1FY-qaR3hZR-Yacju9mvxEPoo1-vjoG-q6Kukw66Pwq0waSAPdxxU6cxlSKGwek-dQCQlb8Ji9xBPtwqAXrN6CyEWB4bq7iX27URDJlZkkE3kC8TOJzH-v3ruhrakk0DS-_4Df-200dnys6SEFCwRzMtdnPcuE0F_QDPWfoPaZjOm3Aq-BFlfkM_itezzwJiRh8pIcMHw5CFhIbdqrsKCHlVMwS0YybJbeRWh2vzw5OxyzS9p23L8_VdM0hz8UFyakJfLvO2bNQ" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "UserId": "44e8f498-1001-7075-0fe6-06f872d9b245",
+  "UserName": "mike@goprosper.com",
+  "ShortDescription": "Walmart Plus Member 24-25",
+  "StudyName": "MBI",
+  "FeatureListName": "MBI-ShortList",
+  "LabelList": [
+    {
+      "Selections": [
+        {
+          "AnswerIds": [
+            0
+          ],
+          "QuestionId": 922
+        }
+      ],
+      "FeatureType": "Binary",
+      "FeatureName": "WalmartPlusMembership"
+    }
+  ],
+  "StudyDates": [
+    "2025-01-01",
+    "2024-01-01"
+  ]
+}'
+
+
+Invoke-RestMethod -Uri "https://xiasqsq8fj.execute-api.us-east-1.amazonaws.com/prod/start-workflow" -Method POST -Headers @{"Authorization"="Bearer eyJraWQiOiJKMDlxbjJEbTVOVmRoTlNnZ3ltc08yRGJucm9pbEUxNVZzdmNNczk3SldBPSIsImFsZyI6IlJTMjU2In0.eyJzdWIiOiI0NGU4ZjQ5OC0xMDAxLTcwNzUtMGZlNi0wNmY4NzJkOWIyNDUiLCJpc3MiOiJodHRwczpcL1wvY29nbml0by1pZHAudXMtZWFzdC0xLmFtYXpvbmF3cy5jb21cL3VzLWVhc3QtMV9MS1RxT3pXVTQiLCJjbGllbnRfaWQiOiI0Y3FhNTloNTk2b2poM2oxYnNhZWsxdGxxZyIsIm9yaWdpbl9qdGkiOiI3OTEzMDYxMy0zYWZiLTRlYjYtOGM5YS0xOTNmYWZlNmU1MGUiLCJldmVudF9pZCI6IjI3NDQyNmE0LTU4MDYtNDBlYy04OTgzLTcxMTU4ZWJjMjYyNCIsInRva2VuX3VzZSI6ImFjY2VzcyIsInNjb3BlIjoiYXdzLmNvZ25pdG8uc2lnbmluLnVzZXIuYWRtaW4iLCJhdXRoX3RpbWUiOjE3NjY2Njc3NTksImV4cCI6MTc2NjY3MTM1OSwiaWF0IjoxNzY2NjY3NzU5LCJqdGkiOiI3OTkzYjMzNS01YzU5LTRlYWItYTI0NC00YTFlNjUwZTY3YzQiLCJ1c2VybmFtZSI6IjQ0ZThmNDk4LTEwMDEtNzA3NS0wZmU2LTA2Zjg3MmQ5YjI0NSJ9.PvyvHpode3VrFkCTJtFHNYSHLa-yFLhaEr5bgOJLBKSZoTkRjAICiBlAQeFP9NRkY2yxh43vJwo1FY-qaR3hZR-Yacju9mvxEPoo1-vjoG-q6Kukw66Pwq0waSAPdxxU6cxlSKGwek-dQCQlb8Ji9xBPtwqAXrN6CyEWB4bq7iX27URDJlZkkE3kC8TOJzH-v3ruhrakk0DS-_4Df-200dnys6SEFCwRzMtdnPcuE0F_QDPWfoPaZjOm3Aq-BFlfkM_itezzwJiRh8pIcMHw5CFhIbdqrsKCHlVMwS0YybJbeRWh2vzw5OxyzS9p23L8_VdM0hz8UFyakJfLvO2bNQ"} -Body '{
+  "UserId": "44e8f498-1001-7075-0fe6-06f872d9b245",
+  "UserName": "mike@goprosper.com",
+  "ShortDescription": "Walmart Plus Member 24-25",
+  "StudyName": "MBI",
+  "FeatureListName": "MBI-ShortList",
+  "LabelList": [
+    {
+      "Selections": [
+        {
+          "AnswerIds": [
+            0
+          ],
+          "QuestionId": 922
+        }
+      ],
+      "FeatureType": "Binary",
+      "FeatureName": "WalmartPlusMembership"
+    }
+  ],
+  "StudyDates": [
+    "2025-01-01",
+    "2024-01-01"
+  ]
+}' -ContentType "application/json"

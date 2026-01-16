@@ -1,0 +1,3 @@
+User pool id: us-east-1_LKTqOzWU4
+Client id: 4cqa59h596ojh3j1bsaek1tlqg
+please deploy

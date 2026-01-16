@@ -1,0 +1,67 @@
+Create React SPA
+Use AWS Cloudscape Design System
+UI will be deployed under cloudfront in S3
+
+Uses cognito for authentication. All HTTP Api calls should be made with JWT access token.
+
+The cognito username should be passed from the client into the API.  The api will retrieve the sub (user id) from the JWT access token.
+
+Use AWS CLI to get information regarding pre-existing APIs.
+
+Main page
+1) Populate's table with pre-existing ModelRequests API. JWT Access Token must be provided.
+2) All attributes from ProsperModels dynamodb table will be returned.  The UI should allow for the selection of attributes to view in the table. The default attributes selected for view should be Id, ShortDescription, Status, SubmissionDateTime
+3) Page should paginate using configurable page size.
+4) Need button for new modelrequest modal form
+
+New ModelRequest modal
+1) Collects data from fields and calls pre-existing CreateModel API when Submit button is pressed.
+2) Sample Input:
+
+URI: "https://xiasqsq8fj.execute-api.us-east-1.amazonaws.com/prod/start-workflow" 
+Method: POST 
+Headers: @{"Authorization"="Bearer jwt access token"} 
+Body: '{
+  "UserName": "mike@goprosper.com",
+  "ShortDescription": "Walmart Plus Member 24-25",
+  "StudyName": "MBI",
+  "FeatureListName": "MBI-ShortList",
+  "LabelList": [
+    {
+      "Selections": [
+        {
+          "AnswerIds": [
+            0
+          ],
+          "QuestionId": 922
+        }
+      ],
+      "FeatureType": "Binary",
+      "FeatureName": "WalmartPlusMembership"
+    }
+  ],
+  "StudyDates": [
+    "2025-01-01",
+    "2024-01-01"
+  ]
+}' -ContentType "application/json"
+
+The following are explanations of the fields in the body:
+
+UserName: the Cognito username
+ShortDescription: ModelRequest form field (max 50 characters)
+StudyName: From a ModelRequest form dropdown with two options: MBI and MCS
+FeatureListName: From a ModelRequest form dropdown. The FeatureListName dropdown is populated by the pre-existing FeatureLists API which is called with the StudyName as input frin the previous field. The JWT Access Token must be provided with the API call. 
+The ModelRequest form should have fields for LabelListName, QuestionId, and AnswerIds (comma delimited list or other UI paradigm). These should be used to format the LabelList field.  FeatureName = LabelListName, FeatureType = Binary AnswerIds = list of integers collected with AnswerId List field field, 
+QuestionId = integer.
+StudyDates: ModelRequest form allows selection of multiple dates. Note that only month and year are needed. The day is always 01. These are formatted as yyyy-mm-dd and put into StudyDates array.
+
+Summary of NewModelRequest modal form fields:
+1) ShortDescription
+2) StudyName
+3) FeatureListName
+3) LabelListName
+4) Label QuestionId
+5) Label AnswerID list
+6) StudyDates list
+7) Cancel and Submit buttons

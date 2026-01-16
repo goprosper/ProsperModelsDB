@@ -1,0 +1,24 @@
+{
+  "UserId": "cognito-user-12345678-1234-1234-1234-1234567890ab",
+  "UserName": "mperkins@example.com",
+  "ShortDescription": "Regularly Use Print Coupons",
+  "StudyName": "MBI",
+  "FeatureListName": "MBI-ShortList",
+  "LabelList": [
+    {
+      "Selections": [
+        {
+          "AnswerIds": [
+            1
+          ],
+          "QuestionId": 976
+        }
+      ],
+      "FeatureType": "Binary",
+      "FeatureName": "RegularlyUsePrintCoupons"
+    }
+  ],
+  "StudyDates": [
+    "2025-01-01"
+  ]
+}

@@ -1,0 +1,1093 @@
+{
+    "Comment": "Insert record, fetch FeatureList, convert to numbers, append Label (no DynamoDB updates), then call RawData Lambda and return. Updated to use JWT claims and enhanced error handling v2.1.",
+    "QueryLanguage": "JSONata",
+    "StartAt": "InitId",
+    "TimeoutSeconds": 23400,
+    "States": {
+        "InitId": {
+            "Type": "Pass",
+            "Assign": {
+                "id": "{% $uuid() %}"
+            },
+            "Next": "InitVariables"
+        },
+        "InitVariables": {
+            "Type": "Pass",
+            "Assign": {
+                "submissionDateTime": "{% $states.context.Execution.StartTime %}",
+                "userId": "{% $states.input.UserId %}",
+                "userName": "{% $states.input.UserName ? $states.input.UserName : $states.input.UserId %}",
+                "shortDescription": "{% $states.input.ShortDescription %}",
+                "studyName": "{% $states.input.StudyName %}",
+                "featureListName": "{% $states.input.FeatureListName %}",
+                "labelList": "{% $states.input.LabelList %}",
+                "studyDates": "{% $states.input.StudyDates %}",
+                "modelTrainingPlan": "{% $states.input.ModelTrainingPlan ? $states.input.ModelTrainingPlan : 'Silver' %}",
+                "requestName": "{% $replace($states.input.ShortDescription, ' ', '-') & '.' & $states.context.Execution.StartTime &  '.' & $id %}",
+                "jobName": "{% 'prosper-' & $substring($replace($id, '-', ''), 0, 24) %}",
+                "requestInput": "{% $string($states.input) %}"
+            },
+            "Next": "PutRecord"
+        },
+        "PutRecord": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:putItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Item": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    },
+                    "UserId": {
+                        "S": "{% $userId %}"
+                    },
+                    "UserName": {
+                        "S": "{% $userName %}"
+                    },
+                    "SubmissionDateTime": {
+                        "S": "{% $submissionDateTime %}"
+                    },
+                    "ShortDescription": {
+                        "S": "{% $shortDescription %}"
+                    },
+                    "StudyName": {
+                        "S": "{% $studyName %}"
+                    },
+                    "FeatureListName": {
+                        "S": "{% $featureListName %}"
+                    },
+                    "Label": {
+                        "N": "{% $string($labelList[0].Selections[0].QuestionId) %}"
+                    },
+                    "Status": {
+                        "S": "Retrieving Prosper Data"
+                    },
+                    "RequestInput": {
+                        "S": "{% $requestInput %}"
+                    }
+                }
+            },
+            "Next": "GetFeatureList"
+        },
+        "GetFeatureList": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+                "FunctionName": "${GetFeatureListFunctionArn}",
+                "Payload": {
+                    "StudyName": "{% $studyName %}",
+                    "FeatureListName": "{% $featureListName %}"
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "UpdateFeatureListFailedStatus"
+                }
+            ],
+            "Next": "SetQuestionAndFeatureVariables"
+        },
+        "SetQuestionAndFeatureVariables": {
+            "Type": "Pass",
+            "Assign": {
+                "featureList": "{% $states.input.Payload.FeatureList %}",
+                "questionList": "{% $distinct( $append( $states.input.Payload.FeatureList.**.QuestionId, $labelList.**.QuestionId ) ) %}",
+                "studyDatesArray": "{% $studyDates %}"
+            },
+            "Next": "RunRawData"
+        },
+        "RunRawData": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+                "FunctionName": "${RawDataFunctionArn}",
+                "Payload": {
+                    "study_name": "{% $studyName %}",
+                    "study_dates": "{% $studyDatesArray %}",
+                    "request_name": "{% $requestName %}",
+                    "question_list": "{% $questionList %}"
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "UpdateRawDataFailedStatus"
+                }
+            ],
+            "Next": "UpdateCreatingModelingDataStatus"
+        },
+        "UpdateCreatingModelingDataStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status",
+                "ExpressionAttributeNames": {
+                    "#status": "Status"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "Creating Modeling Data"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Next": "CreateModelingData"
+        },
+        "CreateModelingData": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+                "FunctionName": "${CreateModelingDataFunctionArn}",
+                "Payload": {
+                    "RequestName": "{% $requestName %}",
+                    "FeatureList": "{% $featureList %}",
+                    "LabelList": "{% $labelList %}"
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "UpdateCreateModelingDataFailedStatus"
+                }
+            ],
+            "Next": "CheckModelingDataResult"
+        },
+        "CheckModelingDataResult": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Condition": "{% $exists($states.input.Payload.errorType) %}",
+                    "Next": "UpdateDataValidationFailedStatus"
+                }
+            ],
+            "Default": "CaptureModelingDataMetrics"
+        },
+        "CaptureModelingDataMetrics": {
+            "Type": "Pass",
+            "Assign": {
+                "sampleSize": "{% $states.input.Payload.ModelingData.SampleSize %}",
+                "positiveClassRatio": "{% $states.input.Payload.ModelingData.PositiveClassRatio %}"
+            },
+            "Next": "UpdateDataProcessingCompleteStatus"
+        },
+        "UpdateDataProcessingCompleteStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #sampleSize = :sampleSize, #positiveClassRatio = :positiveClassRatio",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#sampleSize": "SampleSize",
+                    "#positiveClassRatio": "PositiveClassRatio"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "Launching AutoML Job"
+                    },
+                    ":sampleSize": {
+                        "N": "{% $string($sampleSize) %}"
+                    },
+                    ":positiveClassRatio": {
+                        "N": "{% $string($positiveClassRatio) %}"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Next": "LaunchAutoMLJob"
+        },
+        "UpdateDataValidationFailedStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #errorMessage = :errorMessage, #errorDetails = :errorDetails",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#errorMessage": "ErrorMessage",
+                    "#errorDetails": "ErrorDetails"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "Data_Validation_Failed"
+                    },
+                    ":errorMessage": {
+                        "S": "{% $states.input.Payload.userMessage %}"
+                    },
+                    ":errorDetails": {
+                        "S": "{% $string($states.input.Payload.details) %}"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "End": true
+        },
+        "LaunchAutoMLJob": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+                "FunctionName": "${SageMakerAutoMLWrapperFunctionArn}",
+                "Payload": {
+                    "AutoMLJobName": "{% $jobName %}",
+                    "InputDataConfig": [
+                        {
+                            "DataSource": {
+                                "S3DataSource": {
+                                    "S3DataType": "S3Prefix",
+                                    "S3Uri": "{% 's3://prosper-raw-data/' & $requestName & '/modeling_data.csv' %}"
+                                }
+                            },
+                            "TargetAttributeName": "{% $labelList[0].FeatureName %}"
+                        }
+                    ],
+                    "OutputDataConfig": {
+                        "S3OutputPath": "{% 's3://prosper-raw-data/' & $requestName & '/automl-output/' %}"
+                    },
+                    "AutoMLJobObjective": {
+                        "MetricName": "{% $positiveClassRatio > 0.7 or $positiveClassRatio < 0.3 ? 'F1' : 'AUC' %}"
+                    },
+                    "ProblemType": "BinaryClassification",
+                    "RoleArn": "${SageMakerExecutionRoleArn}",
+                    "AutoMLJobConfig": {
+                        "CompletionCriteria": "{% $modelTrainingPlan = 'Test' ? { 'MaxCandidates': 2, 'MaxRuntimePerTrainingJobInSeconds': 240, 'MaxAutoMLJobRuntimeInSeconds': 1800 } : $modelTrainingPlan = 'Bronze' ? { 'MaxCandidates': 10, 'MaxRuntimePerTrainingJobInSeconds': 900, 'MaxAutoMLJobRuntimeInSeconds': 3600 } : $modelTrainingPlan = 'Silver' ? { 'MaxCandidates': 20, 'MaxRuntimePerTrainingJobInSeconds': 1200, 'MaxAutoMLJobRuntimeInSeconds': 4800 } : $modelTrainingPlan = 'Gold' ? null : null %}",
+                        "CandidateGenerationConfig": {
+                            "FeatureSpecificationS3Uri": "{% 's3://prosper-raw-data/' & $requestName & '/feature_types.json' %}"
+                        }
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.TaskFailed",
+                        "States.ExecutionLimitExceeded",
+                        "States.Runtime",
+                        "SageMaker.ValidationException",
+                        "SageMaker.AccessDeniedException",
+                        "SageMaker.ThrottlingException",
+                        "S3.NoSuchKey",
+                        "S3.AccessDenied",
+                        "Lambda.Unknown"
+                    ],
+                    "Next": "UpdateLaunchFailureStatus"
+                },
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "UpdateLaunchFailureStatus"
+                }
+            ],
+            "Next": "UpdateJobStartedStatus"
+        },
+        "UpdateJobStartedStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #autoMLJobName = :jobName",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#autoMLJobName": "AutoMLJobName"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "AutoML_Job_Started"
+                    },
+                    ":jobName": {
+                        "S": "{% $jobName %}"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Next": "InitializePolling"
+        },
+        "InitializePolling": {
+            "Type": "Pass",
+            "Assign": {
+                "pollCount": 0,
+                "maxPolls": 1440
+            },
+            "Next": "WaitBeforePolling"
+        },
+        "WaitBeforePolling": {
+            "Type": "Wait",
+            "Seconds": 300,
+            "Next": "PollAutoMLJob"
+        },
+        "PollAutoMLJob": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:sagemaker:describeAutoMLJob",
+            "Arguments": {
+                "AutoMLJobName": "{% $jobName %}"
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "SageMaker.ThrottlingException",
+                        "States.TaskFailed"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "UpdateMonitoringFailedStatus"
+                }
+            ],
+            "Next": "EvaluateJobStatus"
+        },
+        "EvaluateJobStatus": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Condition": "{% $states.input.AutoMLJobStatus = 'Completed' %}",
+                    "Next": "GetBestCandidateJobDescription"
+                },
+                {
+                    "Condition": "{% $states.input.AutoMLJobStatus = 'Failed' %}",
+                    "Next": "UpdateJobFailedStatus"
+                },
+                {
+                    "Condition": "{% $states.input.AutoMLJobStatus = 'Stopped' %}",
+                    "Next": "UpdateJobFailedStatus"
+                },
+                {
+                    "Condition": "{% $states.input.AutoMLJobStatus = 'InProgress' and $pollCount < $maxPolls %}",
+                    "Next": "UpdateJobRunningStatus"
+                },
+                {
+                    "Condition": "{% $pollCount >= $maxPolls %}",
+                    "Next": "UpdateJobTimeoutStatus"
+                }
+            ],
+            "Default": "UpdateJobRunningStatus"
+        },
+        "UpdateJobRunningStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status",
+                "ExpressionAttributeNames": {
+                    "#status": "Status"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "AutoML_Job_Running"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Next": "IncrementPollCount"
+        },
+        "IncrementPollCount": {
+            "Type": "Pass",
+            "Assign": {
+                "pollCount": "{% $pollCount + 1 %}"
+            },
+            "Next": "WaitBeforePolling"
+        },
+        "GetBestCandidateJobDescription": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:sagemaker:describeTrainingJob",
+            "Arguments": {
+                "TrainingJobName": "{% $states.input.BestCandidate ? $states.input.BestCandidate.CandidateName : 'unknown' %}"
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "SageMaker.ThrottlingException",
+                        "States.TaskFailed"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "UpdateJobCompletedStatusWithoutJobDescription"
+                }
+            ],
+            "Next": "UpdateJobCompletedStatusWithJobDescription"
+        },
+        "UpdateJobCompletedStatusWithJobDescription": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #bestCandidateJobDescription = :jobDescription, #bestCandidateTrainingImage = :trainingImage, #bestCandidateHyperParameters = :hyperParameters, #bestCandidateTrainingInstance = :trainingInstance",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#bestCandidateJobDescription": "BestCandidateJobDescription",
+                    "#bestCandidateTrainingImage": "BestCandidateTrainingImage",
+                    "#bestCandidateHyperParameters": "BestCandidateHyperParameters",
+                    "#bestCandidateTrainingInstance": "BestCandidateTrainingInstance"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "AutoML_Job_Completed"
+                    },
+                    ":jobDescription": {
+                        "S": "{% $string($states.input) %}"
+                    },
+                    ":trainingImage": {
+                        "S": "{% $states.input.AlgorithmSpecification ? $states.input.AlgorithmSpecification.TrainingImage : 'Not available' %}"
+                    },
+                    ":hyperParameters": {
+                        "S": "{% $states.input.HyperParameters ? $string($states.input.HyperParameters) : 'Not available' %}"
+                    },
+                    ":trainingInstance": {
+                        "S": "{% $states.input.ResourceConfig ? $states.input.ResourceConfig.InstanceType : 'Not available' %}"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Next": "GetFinalAutoMLJobDescription"
+        },
+        "UpdateJobCompletedStatusWithoutJobDescription": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #bestCandidateJobDescription = :jobDescription, #bestCandidateTrainingImage = :trainingImage, #bestCandidateHyperParameters = :hyperParameters, #bestCandidateTrainingInstance = :trainingInstance",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#bestCandidateJobDescription": "BestCandidateJobDescription",
+                    "#bestCandidateTrainingImage": "BestCandidateTrainingImage",
+                    "#bestCandidateHyperParameters": "BestCandidateHyperParameters",
+                    "#bestCandidateTrainingInstance": "BestCandidateTrainingInstance"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "AutoML_Job_Completed"
+                    },
+                    ":jobDescription": {
+                        "S": "Best candidate job description unavailable"
+                    },
+                    ":trainingImage": {
+                        "S": "Not available"
+                    },
+                    ":hyperParameters": {
+                        "S": "Not available"
+                    },
+                    ":trainingInstance": {
+                        "S": "Not available"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Next": "GetFinalAutoMLJobDescription"
+        },
+        "GetFinalAutoMLJobDescription": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:sagemaker:describeAutoMLJob",
+            "Arguments": {
+                "AutoMLJobName": "{% $jobName %}"
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "SageMaker.ThrottlingException",
+                        "States.TaskFailed"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "CaptureAutoMLJobDescriptionWithoutData"
+                }
+            ],
+            "Next": "CaptureAutoMLJobDescription"
+        },
+        "CaptureAutoMLJobDescription": {
+            "Type": "Pass",
+            "Assign": {
+                "autoMLJobDescription": "{% $string($states.input) %}",
+                "bestCandidateJobName": "{% $exists($states.input.BestCandidate.CandidateName) ? $states.input.BestCandidate.CandidateName : 'Not available' %}",
+                "objectiveMetric": "{% $exists($states.input.ResolvedAttributes.AutoMLJobObjective.MetricName) ? $states.input.ResolvedAttributes.AutoMLJobObjective.MetricName : 'Not available' %}",
+                "completionCriteria": "{% $exists($states.input.ResolvedAttributes.CompletionCriteria) ? $string($states.input.ResolvedAttributes.CompletionCriteria) : 'Not available' %}",
+                "bestCandidateMetrics": "{% $exists($states.input.BestCandidate.CandidateProperties.CandidateMetrics) ? $string($states.input.BestCandidate.CandidateProperties.CandidateMetrics) : 'Not available' %}"
+            },
+            "Next": "CalculateJobCosts"
+        },
+        "CaptureAutoMLJobDescriptionWithoutData": {
+            "Type": "Pass",
+            "Assign": {
+                "autoMLJobDescription": "Failed to retrieve AutoML job description",
+                "bestCandidateJobName": "Not available",
+                "objectiveMetric": "Not available",
+                "completionCriteria": "Not available",
+                "bestCandidateMetrics": "Not available"
+            },
+            "Next": "CalculateJobCosts"
+        },
+        "CalculateJobCosts": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+                "FunctionName": "${CalculateJobCostFunctionArn}",
+                "Payload": {
+                    "AutoMLJobName": "{% $jobName %}",
+                    "Id": "{% $id %}"
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "UpdateCostCalculationFailedStatus"
+                }
+            ],
+            "Next": "SetCostVariables"
+        },
+        "SetCostVariables": {
+            "Type": "Pass",
+            "Assign": {
+                "jobCostData": "{% $states.input.Payload.statusCode = 200 ? $states.input.Payload.JobCost : null %}"
+            },
+            "Next": "UpdateWorkflowCompletedStatus"
+        },
+        "UpdateWorkflowCompletedStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #autoMLJobDescription = :autoMLJobDescription, #bestCandidateJobName = :bestCandidateJobName, #objectiveMetric = :objectiveMetric, #completionCriteria = :completionCriteria, #bestCandidateMetrics = :bestCandidateMetrics, #jobCost = :jobCost",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#autoMLJobDescription": "AutoMLJobDescription",
+                    "#bestCandidateJobName": "BestCandidateJobName",
+                    "#objectiveMetric": "ObjectiveMetric",
+                    "#completionCriteria": "CompletionCriteria",
+                    "#bestCandidateMetrics": "BestCandidateMetrics",
+                    "#jobCost": "JobCost"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "Completed"
+                    },
+                    ":autoMLJobDescription": {
+                        "S": "{% $exists($autoMLJobDescription) and $autoMLJobDescription != '' ? $string($autoMLJobDescription) : 'AutoML job description unavailable' %}"
+                    },
+                    ":bestCandidateJobName": {
+                        "S": "{% $exists($bestCandidateJobName) and $bestCandidateJobName != 'Not available' ? $bestCandidateJobName : 'Not available' %}"
+                    },
+                    ":objectiveMetric": {
+                        "S": "{% $exists($objectiveMetric) and $objectiveMetric != 'Not available' ? $objectiveMetric : 'Not available' %}"
+                    },
+                    ":completionCriteria": {
+                        "S": "{% $exists($completionCriteria) and $completionCriteria != 'Not available' ? $completionCriteria : 'Not available' %}"
+                    },
+                    ":bestCandidateMetrics": {
+                        "S": "{% $exists($bestCandidateMetrics) and $bestCandidateMetrics != 'Not available' ? $bestCandidateMetrics : 'Not available' %}"
+                    },
+                    ":jobCost": {
+                        "S": "{% $exists($jobCostData) and $jobCostData ? $string($jobCostData) : 'Cost calculation failed' %}"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "End": true
+        },
+        "UpdateCostCalculationFailedStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #errorMessage = :errorMessage",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#errorMessage": "ErrorMessage"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "Cost_Calculation_Failed"
+                    },
+                    ":errorMessage": {
+                        "S": "Failed to calculate job costs"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "End": true
+        },
+        "UpdateJobFailedStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #errorMessage = :errorMessage",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#errorMessage": "ErrorMessage"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "AutoML_Job_Failed"
+                    },
+                    ":errorMessage": {
+                        "S": "{% $states.input.FailureReason ? $states.input.FailureReason : 'AutoML job failed' %}"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "End": true
+        },
+        "UpdateJobTimeoutStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #errorMessage = :errorMessage",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#errorMessage": "ErrorMessage"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "AutoML_Job_Timeout"
+                    },
+                    ":errorMessage": {
+                        "S": "AutoML job exceeded maximum polling duration of 24 hours"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "End": true
+        },
+        "UpdateLaunchFailureStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #errorMessage = :errorMessage",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#errorMessage": "ErrorMessage"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "AutoML_Job_Launch_Failed"
+                    },
+                    ":errorMessage": {
+                        "S": "AutoML job launch failed - check CloudWatch logs for details"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "End": true
+        },
+        "UpdateMonitoringFailedStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #errorMessage = :errorMessage",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#errorMessage": "ErrorMessage"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "AutoML_Job_Monitoring_Failed"
+                    },
+                    ":errorMessage": {
+                        "S": "Failed to monitor AutoML job status after retries"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "End": true
+        },
+        "UpdateFeatureListFailedStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #errorMessage = :errorMessage",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#errorMessage": "ErrorMessage"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "Feature_List_Failed"
+                    },
+                    ":errorMessage": {
+                        "S": "{% $states.input.Error ? $states.input.Error : 'Failed to retrieve feature list' %}"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "End": true
+        },
+        "UpdateRawDataFailedStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #errorMessage = :errorMessage",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#errorMessage": "ErrorMessage"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "Raw_Data_Failed"
+                    },
+                    ":errorMessage": {
+                        "S": "{% $states.input.Error ? $states.input.Error : 'Failed to retrieve raw data from Prosper' %}"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "End": true
+        },
+        "UpdateCreateModelingDataFailedStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::dynamodb:updateItem",
+            "Arguments": {
+                "TableName": "${ProsperModelsTableName}",
+                "Key": {
+                    "Id": {
+                        "S": "{% $id %}"
+                    }
+                },
+                "UpdateExpression": "SET #status = :status, #errorMessage = :errorMessage",
+                "ExpressionAttributeNames": {
+                    "#status": "Status",
+                    "#errorMessage": "ErrorMessage"
+                },
+                "ExpressionAttributeValues": {
+                    ":status": {
+                        "S": "Create_Modeling_Data_Failed"
+                    },
+                    ":errorMessage": {
+                        "S": "{% $states.input.Error ? $states.input.Error : 'Failed to create modeling data' %}"
+                    }
+                }
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "DynamoDB.ProvisionedThroughputExceededException",
+                        "DynamoDB.ThrottlingException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "End": true
+        }
+    }
+}

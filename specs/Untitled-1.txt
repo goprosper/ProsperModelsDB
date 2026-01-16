@@ -1,0 +1,9 @@
+Modify template.yaml to do the following:
+
+1) launch sagemaker automl job using output from prosper-raw-data/$requestName/modeling_data.csv.  Output should go to prosper-raw-data/$requestName/ folder.
+
+2) poll automl job every minute to determine if it has completed or failed.
+
+3) when the job has completed or failed, update dynamodb table attribute Status with appropriate status information.  If the job failed, update attribute ErrorMessage with the appropriate error message.
+
+prosper-03229289a40849e68bdd71eabc84473c

@@ -1,0 +1,95 @@
+Please generate SAM file for
+1) DynamoDB table as defined below:
+    {
+        "f2id": "arn:aws:dynamodb:us-east-1:214666064132:table/ProsperModels",
+        "f2type": "dynamodb.table",
+        "f2data": {
+            "AttributeDefinitions": [
+                {
+                    "AttributeName": "Id",
+                    "AttributeType": "S"
+                },
+                {
+                    "AttributeName": "SubmissionDateTime",
+                    "AttributeType": "S"
+                },
+                {
+                    "AttributeName": "UserId",
+                    "AttributeType": "S"
+                }
+            ],
+            "TableName": "ProsperModels",
+            "KeySchema": [
+                {
+                    "AttributeName": "Id",
+                    "KeyType": "HASH"
+                }
+            ],
+            "TableStatus": "ACTIVE",
+            "CreationDateTime": "2025-10-29T08:48:22.033Z",
+            "ProvisionedThroughput": {
+                "NumberOfDecreasesToday": 0,
+                "ReadCapacityUnits": 0,
+                "WriteCapacityUnits": 0
+            },
+            "TableSizeBytes": 0,
+            "ItemCount": 0,
+            "TableArn": "arn:aws:dynamodb:us-east-1:214666064132:table/ProsperModels",
+            "TableId": "38221ed3-b3d3-4d7e-8689-ad782e5a580d",
+            "BillingModeSummary": {
+                "BillingMode": "PAY_PER_REQUEST",
+                "LastUpdateToPayPerRequestDateTime": "2025-10-29T08:48:22.033Z"
+            },
+            "GlobalSecondaryIndexes": [
+                {
+                    "IndexName": "UserId-SubmissionDateTime-index",
+                    "KeySchema": [
+                        {
+                            "AttributeName": "UserId",
+                            "KeyType": "HASH"
+                        },
+                        {
+                            "AttributeName": "SubmissionDateTime",
+                            "KeyType": "RANGE"
+                        }
+                    ],
+                    "Projection": {
+                        "ProjectionType": "ALL"
+                    },
+                    "IndexStatus": "ACTIVE",
+                    "ProvisionedThroughput": {
+                        "NumberOfDecreasesToday": 0,
+                        "ReadCapacityUnits": 0,
+                        "WriteCapacityUnits": 0
+                    },
+                    "IndexSizeBytes": 0,
+                    "ItemCount": 0,
+                    "IndexArn": "arn:aws:dynamodb:us-east-1:214666064132:table/ProsperModels/index/UserId-SubmissionDateTime-index"
+                }
+            ],
+            "TableClassSummary": {
+                "TableClass": "STANDARD"
+            },
+            "DeletionProtectionEnabled": false,
+            "TimeToLiveDescription": {
+                "TimeToLiveStatus": "DISABLED"
+            }
+        },
+
+2) Generate a lambda that uses cognito user ID (sub) to scan the table by SubmissionDateTime descending.  The inputs to the lambda should be the pagination indicator (ExclusiveStartKey) and number of rows to return and returns LastEvaluatedKey along with a list of records containing the following attributes:
+
+Id: string
+UserId: string
+UserName: string
+SubmissionDateTime: string
+ShortDescription: string
+FeatureListName: string
+Label: number
+Status: string
+FailureStep: string
+ErrorMessage: string
+AUC: number
+
+Generate the lambda code in file ProsperModelsLambda.py in Python.
+
+3) Generate an HTTP API that provides access to the lambda.

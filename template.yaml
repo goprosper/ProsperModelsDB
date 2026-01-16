@@ -1,0 +1,433 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: ProsperModels with Step Functions - v2.1 with BestCandidateJobDescription support
+
+Parameters:
+  FeatureListTableName:
+    Type: String
+    Description: DynamoDB table containing the FeatureList (keyed by StudyName)
+    Default: ProsperModels-FeatureLists
+  RawDataFunctionArn:
+    Type: String
+    Description: ARN of the RawDataFunction Lambda to invoke as the final step
+    Default: arn:aws:lambda:us-east-1:214666064132:function:sam-rawdata-app-RawDataFunction-ctCxAioFZKiA
+  CognitoUserPoolId:
+    Type: String
+    Description: ID of the existing Cognito User Pool (ProsperML)
+  CognitoUserPoolClientId:
+    Type: String
+    Description: ID of the existing Cognito User Pool Client
+  DeploymentVersion:
+    Type: String
+    Description: Version to force deployment updates
+    Default: "2_21"
+
+Outputs:
+  StateMachineArn:
+    Description: ARN of the Step Functions state machine
+    Value: !GetAtt ProsperModelsWorkflow.Arn
+  ApiGatewayUrl:
+    Description: URL of the HTTP API Gateway
+    Value: !Sub "https://${ProsperModelsApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiGatewayUrl"
+  SageMakerExecutionRoleArn:
+    Description: ARN of the SageMaker execution role for AutoML jobs
+    Value: !GetAtt SageMakerExecutionRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-SageMakerExecutionRoleArn"
+  ProsperModelsTableName:
+    Description: Name of the DynamoDB table for storing model requests
+    Value: !Ref ProsperModelsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-ProsperModelsTableName"
+  SageMakerAutoMLWrapperFunctionArn:
+    Description: ARN of the SageMaker AutoML Wrapper Lambda function
+    Value: !GetAtt SageMakerAutoMLWrapperFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-SageMakerAutoMLWrapperFunctionArn"
+
+Resources:
+  # API Gateway Resources
+  ProsperModelsApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: ProsperModelsApi
+      Description: HTTP API for ProsperModels workflow - Updated for JWT claims
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowCredentials: false
+        AllowHeaders: ["*"]
+        AllowMethods: ["*"]
+        AllowOrigins: ["*"]
+
+  JWTAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref ProsperModelsApi
+      AuthorizerType: JWT
+      Name: CognitoJWTAuthorizer
+      IdentitySource: ["$request.header.Authorization"]
+      JwtConfiguration:
+        Audience: [!Ref CognitoUserPoolClientId]
+        Issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPoolId}"
+
+  # API Gateway Integrations
+  StepFunctionsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ProsperModelsApi
+      IntegrationType: AWS_PROXY
+      IntegrationSubtype: StepFunctions-StartExecution
+      CredentialsArn: !GetAtt ApiGatewayStepFunctionsRole.Arn
+      RequestParameters:
+        StateMachineArn: !GetAtt ProsperModelsWorkflow.Arn
+        Input: "$request.body"
+      PayloadFormatVersion: "1.0"
+
+  ModelRequestsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ProsperModelsApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ModelRequestsFunction.Arn}/invocations"
+      PayloadFormatVersion: "2.0"
+
+  FeatureListsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ProsperModelsApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FeatureListsFunction.Arn}/invocations"
+      PayloadFormatVersion: "2.0"
+
+  # API Gateway Routes
+  StartWorkflowRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ProsperModelsApi
+      RouteKey: "POST /start-workflow"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref JWTAuthorizer
+      Target: !Sub "integrations/${StepFunctionsIntegration}"
+
+  ModelRequestsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ProsperModelsApi
+      RouteKey: "GET /model-requests"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref JWTAuthorizer
+      Target: !Sub "integrations/${ModelRequestsIntegration}"
+
+  FeatureListsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ProsperModelsApi
+      RouteKey: "GET /feature-lists"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref JWTAuthorizer
+      Target: !Sub "integrations/${FeatureListsIntegration}"
+
+  ApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref ProsperModelsApi
+      StageName: prod
+      AutoDeploy: true
+
+  # Lambda Permissions
+  ModelRequestsLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ModelRequestsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ProsperModelsApi}/*/*"
+
+  FeatureListsLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref FeatureListsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ProsperModelsApi}/*/*"
+
+  # IAM Role for API Gateway to invoke Step Functions
+  ApiGatewayStepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StepFunctionsExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !GetAtt ProsperModelsWorkflow.Arn
+
+  # SageMaker Execution Role
+  SageMakerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - arn:aws:s3:::prosper-raw-data/*
+                  - arn:aws:s3:::prosper-raw-data
+        - PolicyName: CloudWatchLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/sagemaker/*"
+
+  # DynamoDB Table
+  ProsperModelsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ProsperModels
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: Id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: Id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+
+  # Lambda Functions
+  GetFeatureListFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.13
+      Handler: GetFeatureList.lambda_handler
+      CodeUri: src-minimal/
+      Timeout: 900
+      MemorySize: 128
+      Description: Retrieve FeatureList
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref FeatureListTableName
+
+  # Lambda Layers - Using AWS provided pandas layer
+
+  CreateModelingDataFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.13
+      Handler: CreateModelingData.lambda_handler
+      CodeUri: src-minimal/
+      Timeout: 900
+      MemorySize: 256
+      Description: Generate Modeling Data Files
+      Layers:
+        - arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python313:5
+      Environment:
+        Variables:
+          PYTHONPATH: /opt/python
+      Policies:
+        - S3ReadPolicy:
+            BucketName: prosper-raw-data
+        - S3WritePolicy:
+            BucketName: prosper-raw-data
+
+  ModelRequestsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.13
+      Handler: ProsperModelsLambda.lambda_handler
+      CodeUri: src-minimal/
+      Timeout: 30
+      MemorySize: 128
+      Description: Retrieve paginated model requests for authenticated user
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ProsperModelsTable
+          GSI_NAME: UserIdDateTime
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProsperModelsTable
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource: !Sub "${ProsperModelsTable.Arn}/index/UserIdDateTime"
+
+  FeatureListsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.13
+      Handler: FeatureListsLambda.lambda_handler
+      CodeUri: src-minimal/
+      Timeout: 30
+      MemorySize: 128
+      Description: Retrieve feature list names by study name for authenticated user
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref FeatureListTableName
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref FeatureListTableName
+
+  CalculateJobCostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.13
+      Handler: CalculateJobCostLambda.lambda_handler
+      CodeUri: src-minimal/
+      Timeout: 300
+      MemorySize: 256
+      Description: Calculate costs for AutoML jobs using AWS Pricing API
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ProsperModelsTable
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref ProsperModelsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sagemaker:ListCandidatesForAutoMLJob
+                - sagemaker:DescribeAutoMLJob
+                - sagemaker:DescribeTrainingJob
+                - sagemaker:DescribeProcessingJob
+                - sagemaker:DescribeTransformJob
+                - pricing:GetProducts
+                - pricing:DescribeServices
+                - pricing:GetAttributeValues
+              Resource: "*"
+
+  # SageMaker AutoML Wrapper Lambda Function
+  SageMakerAutoMLWrapperFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "sagemaker-automl-wrapper-${AWS::StackName}"
+      Runtime: python3.13
+      Handler: lambda_function.lambda_handler
+      CodeUri: src/lambda_sagemaker_automl_wrapper/
+      Timeout: 300
+      MemorySize: 512
+      Description: "Lambda wrapper for SageMaker CreateAutoMLJob API with FeatureSpecificationS3Uri support"
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+          ENVIRONMENT: !Ref DeploymentVersion
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sagemaker:CreateAutoMLJob
+                - sagemaker:DescribeAutoMLJob
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:HeadObject
+              Resource:
+                - "arn:aws:s3:::prosper-raw-data/*"
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/sagemaker-automl-wrapper-${AWS::StackName}*"
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource: !GetAtt SageMakerExecutionRole.Arn
+              Condition:
+                StringEquals:
+                  "iam:PassedToService": "sagemaker.amazonaws.com"
+      Tags:
+        Service: sagemaker-automl-wrapper
+        ManagedBy: CloudFormation
+
+  # Step Functions State Machine
+  ProsperModelsWorkflow:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/prosper-models-workflow.json
+      DefinitionSubstitutions:
+        ProsperModelsTableName: !Ref ProsperModelsTable
+        FeatureListTableName: !Ref FeatureListTableName
+        RawDataFunctionArn: !Ref RawDataFunctionArn
+        SageMakerExecutionRoleArn: !GetAtt SageMakerExecutionRole.Arn
+        GetFeatureListFunctionArn: !GetAtt GetFeatureListFunction.Arn
+        CreateModelingDataFunctionArn: !GetAtt CreateModelingDataFunction.Arn
+        CalculateJobCostFunctionArn: !GetAtt CalculateJobCostFunction.Arn
+        SageMakerAutoMLWrapperFunctionArn: !GetAtt SageMakerAutoMLWrapperFunction.Arn
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref ProsperModelsTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref GetFeatureListFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref CreateModelingDataFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref CalculateJobCostFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref SageMakerAutoMLWrapperFunction
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource:
+                - !Ref RawDataFunctionArn
+                - !Sub "${RawDataFunctionArn}:*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sagemaker:CreateAutoMLJob
+                - sagemaker:DescribeAutoMLJob
+                - sagemaker:StopAutoMLJob
+                - sagemaker:ListAutoMLJobs
+                - sagemaker:DescribeTrainingJob
+              Resource:
+                - !Sub "arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:automl-job/*"
+                - !Sub "arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:training-job/*"
+        - Statement:
+            - Effect: Allow
+              Action: iam:PassRole
+              Resource: !GetAtt SageMakerExecutionRole.Arn
+              Condition:
+                StringEquals:
+                  "iam:PassedToService": sagemaker.amazonaws.com
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+                - dynamodb:GetItem
+              Resource: !GetAtt ProsperModelsTable.Arn

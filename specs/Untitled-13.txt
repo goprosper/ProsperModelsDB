@@ -1,0 +1,4 @@
+aws dynamodb describe-table --table-name ProsperModels --query "Table.GlobalSecondaryIndexes[?IndexName=='UserIdDateTime']"
+
+
+aws dynamodb describe-table --table-name ProsperModels

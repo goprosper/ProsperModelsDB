@@ -1,0 +1,149 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: "Lambda SageMaker AutoML Wrapper - Provides full SageMaker CreateAutoMLJob API support for Step Functions"
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Environment name
+
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues: [DEBUG, INFO, WARNING, ERROR]
+    Description: Lambda function log level
+
+Globals:
+  Function:
+    Timeout: 300
+    MemorySize: 512
+    Runtime: python3.13
+    Environment:
+      Variables:
+        LOG_LEVEL: !Ref LogLevel
+        ENVIRONMENT: !Ref Environment
+
+Resources:
+  # Lambda Function
+  SageMakerAutoMLWrapperFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "sagemaker-automl-wrapper-${Environment}"
+      CodeUri: ./
+      Handler: lambda_function.lambda_handler
+      Description: "Lambda wrapper for SageMaker CreateAutoMLJob API with FeatureSpecificationS3Uri support"
+      Role: !GetAtt SageMakerAutoMLWrapperRole.Arn
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          ENVIRONMENT: !Ref Environment
+      Tags:
+        Environment: !Ref Environment
+        Service: sagemaker-automl-wrapper
+        ManagedBy: SAM
+
+  # IAM Role for Lambda Function
+  SageMakerAutoMLWrapperRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "SageMakerAutoMLWrapperRole-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SageMakerAutoMLAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # SageMaker permissions for AutoML job creation
+              - Effect: Allow
+                Action:
+                  - sagemaker:CreateAutoMLJob
+                  - sagemaker:DescribeAutoMLJob
+                Resource: "*"
+
+              # S3 permissions for feature specification files
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:HeadObject
+                Resource:
+                  - "arn:aws:s3:::prosper-raw-data/*"
+                  - "arn:aws:s3:::*-feature-specifications/*"
+
+              # CloudWatch Logs permissions (enhanced logging)
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/sagemaker-automl-wrapper-${Environment}*"
+
+  # CloudWatch Log Group with retention
+  SageMakerAutoMLWrapperLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/sagemaker-automl-wrapper-${Environment}"
+      RetentionInDays: 30
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: sagemaker-automl-wrapper
+
+  # Lambda Function Version
+  SageMakerAutoMLWrapperFunctionVersion:
+    Type: AWS::Lambda::Version
+    Properties:
+      FunctionName: !Ref SageMakerAutoMLWrapperFunction
+      Description: !Sub "Version for ${Environment} environment"
+
+  # Lambda Function Alias
+  SageMakerAutoMLWrapperFunctionAlias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      FunctionName: !Ref SageMakerAutoMLWrapperFunction
+      FunctionVersion: !GetAtt SageMakerAutoMLWrapperFunctionVersion.Version
+      Name: !Ref Environment
+      Description: !Sub "Alias for ${Environment} environment"
+
+Outputs:
+  SageMakerAutoMLWrapperFunctionArn:
+    Description: "ARN of the SageMaker AutoML Wrapper Lambda function"
+    Value: !GetAtt SageMakerAutoMLWrapperFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-SageMakerAutoMLWrapperFunctionArn"
+
+  SageMakerAutoMLWrapperFunctionName:
+    Description: "Name of the SageMaker AutoML Wrapper Lambda function"
+    Value: !Ref SageMakerAutoMLWrapperFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-SageMakerAutoMLWrapperFunctionName"
+
+  SageMakerAutoMLWrapperRoleArn:
+    Description: "ARN of the SageMaker AutoML Wrapper IAM role"
+    Value: !GetAtt SageMakerAutoMLWrapperRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-SageMakerAutoMLWrapperRoleArn"
+
+  StepFunctionsIntegrationResource:
+    Description: "Resource ARN for Step Functions integration (use this in your state machine)"
+    Value: !Sub "arn:aws:states:::lambda:invoke"
+    Export:
+      Name: !Sub "${AWS::StackName}-StepFunctionsResource"
+
+  StepFunctionsLambdaArn:
+    Description: "Lambda ARN for Step Functions FunctionName parameter"
+    Value: !GetAtt SageMakerAutoMLWrapperFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-StepFunctionsLambdaArn"

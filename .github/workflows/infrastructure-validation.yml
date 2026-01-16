@@ -1,0 +1,197 @@
+name: Infrastructure Validation
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "template.yaml"
+      - "modelrequests-template.yaml"
+      - "samconfig*.toml"
+      - ".github/workflows/infrastructure-validation.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "template.yaml"
+      - "modelrequests-template.yaml"
+      - "samconfig*.toml"
+  schedule:
+    # Run daily at 9 AM UTC to catch configuration drift
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to validate (dev/staging/prod/all)"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+          - all
+
+jobs:
+  validate-infrastructure:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write # Required for AWS OIDC
+      contents: read
+
+    strategy:
+      matrix:
+        environment:
+          - ${{ github.event.inputs.environment == 'all' && 'dev' || github.event.inputs.environment || 'dev' }}
+          - ${{ github.event.inputs.environment == 'all' && 'staging' || '' }}
+          - ${{ github.event.inputs.environment == 'all' && 'prod' || '' }}
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3 botocore
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          role-session-name: infrastructure-validation
+
+      - name: Validate SAM templates
+        run: |
+          # Install SAM CLI
+          pip install aws-sam-cli
+
+          # Validate main template
+          sam validate --template template.yaml
+
+          # Validate model requests template if it exists
+          if [ -f "modelrequests-template.yaml" ]; then
+            sam validate --template modelrequests-template.yaml
+          fi
+
+      - name: Run infrastructure validation
+        if: matrix.environment != ''
+        run: |
+          python scripts/validate-infrastructure.py --environment ${{ matrix.environment }}
+        continue-on-error: true
+        id: validation
+
+      - name: Upload validation results
+        if: always() && matrix.environment != ''
+        uses: actions/upload-artifact@v3
+        with:
+          name: validation-results-${{ matrix.environment }}
+          path: |
+            validation-*.json
+            validation-*.log
+          retention-days: 30
+
+      - name: Comment on PR with validation results
+        if: github.event_name == 'pull_request' && matrix.environment != ''
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const environment = '${{ matrix.environment }}';
+            const validationSuccess = '${{ steps.validation.outcome }}' === 'success';
+
+            const body = validationSuccess 
+              ? `✅ Infrastructure validation passed for **${environment}** environment`
+              : `❌ Infrastructure validation failed for **${environment}** environment. Check the workflow logs for details.`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  validate-all-environments:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.environment == 'all' || github.event.inputs.environment == ''
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3 botocore
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          role-session-name: infrastructure-validation-all
+
+      - name: Run comprehensive validation
+        run: |
+          python scripts/validate-infrastructure.py --all-environments
+        id: validation-all
+
+      - name: Create validation summary
+        if: always()
+        run: |
+          echo "## Infrastructure Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.validation-all.outcome }}" == "success" ]; then
+            echo "✅ All environments passed validation" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Some environments failed validation" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environments checked:** dev, staging, prod" >> $GITHUB_STEP_SUMMARY
+          echo "**Validation date:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+
+  security-scan:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run cfn-lint
+        run: |
+          pip install cfn-lint
+          cfn-lint template.yaml
+          if [ -f "modelrequests-template.yaml" ]; then
+            cfn-lint modelrequests-template.yaml
+          fi
+
+      - name: Run cfn_nag security scan
+        uses: stelligent/cfn_nag@master
+        with:
+          input_path: template.yaml
+          extra_args: --fail-on-warnings
+
+      - name: Check for hardcoded secrets
+        run: |
+          # Simple check for potential secrets in templates
+          if grep -r -i "password\|secret\|key" *.yaml --exclude-dir=.git; then
+            echo "⚠️ Potential hardcoded secrets found in templates"
+            exit 1
+          fi

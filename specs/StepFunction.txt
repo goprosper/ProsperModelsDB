@@ -1,0 +1,25 @@
+Add a step function to the template.yaml that does the following:
+
+Step Function Input:
+
+Step 1: inserts a record into ProsperModels with the following data:
+
+Id: A generated UUID identifier. This Id needs to be available to all steps of the step function.
+UserId: The cognito user userid
+UserName: The cognito user username
+SubmissionDateTime: Current Date and Time in ISO 8601 format in UTC
+ShortDescription: string from execution input
+StudyName: string from execution input
+FeatureListName: string from execution input
+Label: number from execution input
+StudyDates: list of strings containing dates in "YYYY-MM-DD" format
+
+Step 2: Retrieves  the FeatureList from ProsperModels-FeatureList. This is a predefined dynamodb function. It has a partition key of StudyName. A single record should be retrieved where partition key = StudyName from the execution context.
+
+Step 3: Add the Label from the execution input to the FeatureList returned in step 2. Return the resulting list.
+
+Minimize the use of Lambda functions for cost and performance. Perform Step 1, Step 2, and Step 3 computations in Step Functions if possible.
+
+In addition to generating the new template.yaml and associated files.  Please merge the new resources into the provided template.yaml.  Also, generate a sample execution context for testing the step function.
+
+

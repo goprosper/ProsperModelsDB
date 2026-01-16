@@ -1,0 +1,20 @@
+$items = aws sagemaker list-candidates-for-auto-ml-job `
+  --auto-ml-job-name prosper-8f16be0e91504c7e8041ea3f `
+  --query "Candidates[].{Candidate:CandidateName,TrainingArn:CandidateSteps[?CandidateStepType=='Training'].CandidateStepArn|[0]}" `
+  --output json | ConvertFrom-Json
+
+$items | ForEach-Object {
+  $name = ($_.TrainingArn -split "/")[-1]
+  "`n== $($_.Candidate) =="
+  aws sagemaker describe-training-job `
+    --training-job-name $name `
+    --query "AlgorithmSpecification.{AlgorithmName:AlgorithmName,TrainingImage:TrainingImage}" `
+    --output json
+}
+
+aws sagemaker describe-auto-ml-job \
+  --auto-ml-job-name prosper-8f16be0e91504c7e8041ea3f \
+  --query BestCandidate.CandidateName \
+  --output text
+
+aws sagemaker list-candidates-for-auto-ml-job --auto-ml-job-name prosper-8f16be0e91504c7e8041ea3f --query  "Candidates[?CandidateName=='prosper-8f16be0e91504c7e8041ea2s-071-57592580'].CandidateSteps"

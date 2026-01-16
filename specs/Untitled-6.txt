@@ -1,0 +1,7 @@
+aws sagemaker describe-training-job --training-job-name prosper-8f16be0e91504c7e8041ea3f-dpp9-1-4a978e4406344de0a433231 --query "AlgorithmSpecification.TrainingImage"
+
+prosper-8f16be0e91504c7e8041ea2s-071-57592580aws 
+
+aws sagemaker describe-training-job --training-job-name prosper-8f16be0e91504c7e8041ea2s-071-57592580 --query HyperParameters
+
+[ { "M" : { "Selections" : { "L" : [ { "M" : { "AnswerIds" : { "L" : [ { "N" : "0" } ] }, "QuestionId" : { "N" : "1" } } } ] }, "FeatureType" : { "S" : "Binary" }, "FeatureName" : { "S" : "Male" } } }, { "M" : { "FeatureType" : { "S" : "Category" }, "QuestionId" : { "N" : "3" }, "FeatureName" : { "S" : "Age Range" } } }, { "M" : { "FeatureType" : { "S" : "Category" }, "QuestionId" : { "N" : "8" }, "FeatureName" : { "S" : "HH Income" } } }, { "M" : { "FeatureType" : { "S" : "Zip" }, "QuestionId" : { "N" : "357" }, "FeatureName" : { "S" : "Zip" } } } ]

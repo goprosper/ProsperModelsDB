@@ -1,0 +1,36 @@
+Tabs:
+Overview:
+	Id (from Id, include copy to clipboard)
+	SubmissionDateTime (from SubmissionDateTime)
+	Short Description (from RequestInput.ShortDescription)
+	Status (from Status)
+	ErrorMessage (from ErrorMessage, enable copy to clipboard)
+	AutoMLJobName (from AutoMLJobname, enable copy to clipboard)
+
+Request Details:
+	StudyName (from RequestInput.StudyName)
+	FeatureListName (from RequestInput.FeatureListName)
+	Label Name (from RequestInput.LabelList[0].FeatureListName
+	Label Question ID (from RequestInput.LabelList[0].Selections[0].QuestionId
+	Label Answer IDs (include all from RequestInput.LabelList[0].Selections[0].AnswerIds as comma-delimited list)
+	Study Dates (include all from RequestInput.StudyDates as comma-delimited list)
+	Training File Row Count	***
+	Positive Class Ratio ***
+	ModelTrainingPlan (from RequestInput.ModelTrainingPlan)
+	
+Best Candidate:
+	TrainingJobName (include copy to clipboard)
+	Metrics
+	Hyperparameters
+	Algorithm
+
+Cost:
+	For each Job Type:
+		Total Jobs 
+		Total Runtime 
+		Total Cost
+	Grand Totals (total for all jobs)
+		Total Jobs
+		Total Cost
+
+	
