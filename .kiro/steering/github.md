@@ -61,41 +61,58 @@ A personal access token is configured for the **goprosper** account in the MCP c
 
 ## Git Authentication for Push/Pull
 
-### Method 1: Embedded Token in Remote URL (Not Recommended)
+### Method 1: Git Credential Manager (Recommended - Current Setup)
+
+Git Credential Manager Core securely stores credentials in Windows Credential Manager, eliminating the need to embed tokens in URLs or enter credentials repeatedly.
+
+**Setup Steps:**
+
+1. **Verify Git Credential Manager is installed** (comes with Git for Windows):
+   ```bash
+   git credential-manager-core --version
+   ```
+
+2. **Configure Git to use credential manager**:
+   ```bash
+   git config --global credential.helper manager-core
+   git config --global credential.https://github.com.username goprosper
+   ```
+
+3. **Set remote URL without token**:
+   ```bash
+   git remote add origin https://github.com/goprosper/REPO_NAME.git
+   ```
+   
+   Or update existing remote:
+   ```bash
+   git remote set-url origin https://github.com/goprosper/REPO_NAME.git
+   ```
+
+4. **On first push, Git will prompt for credentials**:
+   - Username: `goprosper`
+   - Password: Use your personal access token (from MCP config or GitHub settings)
+
+5. **Credentials are stored securely** in Windows Credential Manager and reused automatically for all future operations
+
+**Benefits:**
+- Token never visible in `.git/config`
+- Credentials encrypted by Windows
+- Automatic authentication for all git operations
+- Easy to update if token changes
+
+**To view/manage stored credentials:**
+- Open Windows Credential Manager: Control Panel → Credential Manager → Windows Credentials
+- Look for entries starting with `git:https://github.com`
+
+### Method 2: Embedded Token in Remote URL (Not Recommended)
 
 ```bash
 git remote add origin https://TOKEN@github.com/goprosper/REPO_NAME.git
 ```
 
-**Example:**
-```bash
-git remote add origin https://YOUR_TOKEN@github.com/goprosper/ProsperModelsDB.git
-git push -u origin main
-```
+**Security Warning:** The token is visible in `.git/config` and can be exposed. Use Git Credential Manager instead.
 
-**Security Note:** The token is visible in `.git/config`. To remove it:
-```bash
-git remote set-url origin https://github.com/goprosper/ProsperModelsDB.git
-```
-
-### Method 2: Git Credential Manager (Recommended - Current Setup)
-
-1. Install Git Credential Manager (usually comes with Git for Windows)
-2. Configure Git to use credential manager:
-   ```bash
-   git config --global credential.helper manager-core
-   git config --global credential.https://github.com.username goprosper
-   ```
-3. Set remote without token:
-   ```bash
-   git remote add origin https://github.com/goprosper/REPO_NAME.git
-   ```
-4. On first push, Git will prompt for credentials:
-   - Username: `goprosper`
-   - Password: Use your personal access token
-5. Credentials are stored securely in Windows Credential Manager and reused automatically
-
-### Method 3: SSH Keys (Most Secure)
+### Method 3: SSH Keys (Most Secure for Production)
 
 1. Generate SSH key for goprosper account:
    ```bash
@@ -124,14 +141,17 @@ git remote set-url origin https://github.com/goprosper/ProsperModelsDB.git
 
 ## Common Git Operations
 
-### Initial Setup
+### Initial Setup (with Git Credential Manager)
 ```bash
 git init
 git add .
 git commit -m "Initial commit"
 git branch -M main
-git remote add origin https://TOKEN@github.com/goprosper/REPO_NAME.git
+git remote add origin https://github.com/goprosper/REPO_NAME.git
 git push -u origin main
+# Git will prompt for credentials on first push
+# Enter username: goprosper
+# Enter password: your_personal_access_token
 ```
 
 ### Subsequent Pushes
@@ -139,16 +159,27 @@ git push -u origin main
 git add .
 git commit -m "Your commit message"
 git push
+# No credentials needed - automatically authenticated
 ```
 
 ### Check Remote Configuration
 ```bash
 git remote -v
+# Should show: https://github.com/goprosper/REPO_NAME.git (no token visible)
 ```
 
 ### Update Remote URL
 ```bash
-git remote set-url origin NEW_URL
+git remote set-url origin https://github.com/goprosper/REPO_NAME.git
+```
+
+### Check Credential Configuration
+```bash
+git config --global --get credential.helper
+# Should show: manager-core
+
+git config --global --get credential.https://github.com.username
+# Should show: goprosper
 ```
 
 ## Creating New Repositories
@@ -189,17 +220,51 @@ The `goprosper` account is an organization. To manage access:
 2. Check token has `repo` scope
 3. Ensure token hasn't expired
 4. Verify you have push access to the repository
+5. Check stored credentials in Windows Credential Manager
 
-### Token Expired
+### Token Expired or Needs Update
 1. Generate new token at https://github.com/settings/tokens
-2. Update `~/.kiro/settings/mcp.json`
-3. Update git remote URL if using embedded token method
-4. Restart Kiro
+2. Update `~/.kiro/settings/mcp.json` for MCP server
+3. Update stored credentials in Git Credential Manager:
+   ```bash
+   # Remove old credentials
+   git credential-manager-core erase
+   # Enter when prompted:
+   # protocol=https
+   # host=github.com
+   # (press Enter twice)
+   
+   # Next git push will prompt for new credentials
+   ```
+4. Restart Kiro to reconnect MCP server
+
+### Credentials Not Working
+1. Check credential helper is configured:
+   ```bash
+   git config --global --get credential.helper
+   ```
+2. Verify username is set to goprosper:
+   ```bash
+   git config --global --get credential.https://github.com.username
+   ```
+3. Clear and re-enter credentials using the steps above
 
 ## Security Best Practices
 
-1. **Never commit tokens to repositories** - They're in `.gitignore` but be careful
-2. **Use SSH keys for production** - More secure than tokens
-3. **Rotate tokens regularly** - Generate new tokens every 90 days
-4. **Use minimal scopes** - Only grant permissions needed
-5. **Use Git Credential Manager** - Avoid embedding tokens in remote URLs
+1. **Use Git Credential Manager** - Current setup, stores credentials securely
+2. **Never commit tokens to repositories** - Use placeholders in documentation
+3. **Never embed tokens in remote URLs** - Use clean HTTPS URLs with credential manager
+4. **Rotate tokens regularly** - Generate new tokens every 90 days
+5. **Use minimal scopes** - Only grant permissions needed (repo, workflow)
+6. **Use SSH keys for production** - Most secure option for automated systems
+7. **Monitor token usage** - Check GitHub settings for token activity
+
+## Quick Reference
+
+**Current Setup:**
+- Organization: `goprosper`
+- Repository: `https://github.com/goprosper/ProsperModelsDB`
+- Authentication: Git Credential Manager Core
+- Remote URL: `https://github.com/goprosper/ProsperModelsDB.git` (no token)
+- Credentials stored in: Windows Credential Manager (encrypted)
+- MCP Server: GitHub MCP via npx (@modelcontextprotocol/server-github)
