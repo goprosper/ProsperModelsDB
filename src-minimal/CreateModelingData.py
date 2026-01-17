@@ -404,7 +404,7 @@ def add_zip_enhanced_columns(df, data_df, question_map, zip_dict, feature_list):
             
             for i in range(len(data_df)):
                 try:
-                    raw_value = data_df.iloc[i][q.offset]
+                    raw_value = data_df.iloc[i].iloc[q.offset]
                     if raw_value == '' or raw_value == '#NA':
                         zip_codes.append(np.nan)
                         clusters.append(np.nan)
