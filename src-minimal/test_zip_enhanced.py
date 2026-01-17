@@ -146,7 +146,7 @@ def test_feature_types_generator():
     features = [
         MockFeature('age', 'Ordinal'),
         MockFeature('income', 'Ordinal'),
-        MockFeature('zip_code', 'Zip'),
+        MockFeature('zip_code', 'Zip'),  # This will be excluded
         MockFeature('gender', 'Categorical'),
         MockFeature('has_loan', 'Binary'),
     ]
@@ -154,12 +154,15 @@ def test_feature_types_generator():
     # Create generator
     generator = FeatureTypesGenerator()
     
+    # Exclude Zip-type features (simulating the actual code behavior)
+    exclude_labels = ['zip_code']  # Zip features are excluded
+    
     # Generate feature types with extra categorical features
     extra_categorical = ['zip_cluster', 'zip_census_division', 'zip_rural_code']
     
     mapping = generator.generate_feature_types_mapping(
         features,
-        exclude_labels=[],
+        exclude_labels=exclude_labels,
         extra_categorical_features=extra_categorical
     )
     
@@ -167,12 +170,11 @@ def test_feature_types_generator():
     assert 'FeatureDataTypes' in mapping, "Mapping should have FeatureDataTypes key"
     feature_types = mapping['FeatureDataTypes']
     
-    # Verify original features
+    # Verify original features (except Zip)
     assert 'age' in feature_types, "age should be in feature types"
     assert feature_types['age'] == 'numeric', "age should be numeric"
     
-    assert 'zip_code' in feature_types, "zip_code should be in feature types"
-    assert feature_types['zip_code'] == 'categorical', "zip_code should be categorical"
+    assert 'zip_code' not in feature_types, "zip_code should NOT be in feature types (excluded)"
     
     assert 'gender' in feature_types, "gender should be in feature types"
     assert feature_types['gender'] == 'categorical', "gender should be categorical"
@@ -191,11 +193,11 @@ def test_feature_types_generator():
     print(f"\nFeature types mapping:")
     print(json.dumps(feature_types, indent=2))
     
-    # Verify counts
+    # Verify counts (4 original features - 1 excluded Zip + 3 extra = 6 total)
     total_features = len(feature_types)
-    expected_count = len(features) + len(extra_categorical)
+    expected_count = 4 + 3  # age, income, gender, has_loan + 3 zip columns (zip_code excluded)
     assert total_features == expected_count, f"Expected {expected_count} features, got {total_features}"
-    print(f"\n✓ Total features: {total_features} (5 original + 3 extra)")
+    print(f"\n✓ Total features: {total_features} (4 original + 3 extra, zip_code excluded)")
     
     print("\n✓ Test 3 PASSED\n")
     return mapping

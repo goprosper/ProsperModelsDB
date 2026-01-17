@@ -569,6 +569,12 @@ def lambda_handler(event, context):
         # Add zip-enhanced columns (cluster, census_division, rural_code)
         features_df = add_zip_enhanced_columns(features_df, data_df, qmap, zip_dict, feature_list_objects)
         
+        # Remove Zip-type feature columns (they're redundant with zip_cluster)
+        zip_feature_names = [f.name for f in feature_list_objects if f.feature_type == 'Zip']
+        if zip_feature_names:
+            features_df = features_df.drop(columns=zip_feature_names, errors='ignore')
+            logger.info(f'Removed Zip-type feature columns: {zip_feature_names}')
+        
         # Extract labels with partial processing
         label_df = pd.DataFrame()
         label_df = append_features_from_data(label_df, data_df, qmap, zip_dict, label_list_objects)
@@ -647,6 +653,10 @@ def lambda_handler(event, context):
             
             # Get label names to exclude from feature types
             exclude_labels = [label.name for label in label_list_objects] if label_list_objects else []
+            
+            # Also exclude Zip-type features (they're replaced by zip_cluster, zip_census_division, zip_rural_code)
+            zip_feature_names = [f.name for f in feature_list_objects if f.feature_type == 'Zip']
+            exclude_labels.extend(zip_feature_names)
             
             # Add zip-enhanced columns as categorical features
             extra_categorical_features = ['zip_cluster', 'zip_census_division', 'zip_rural_code']
