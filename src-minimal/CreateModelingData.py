@@ -104,7 +104,7 @@ class Feature:
         feature_value = 0
 
         if self.feature_type == 'Zip':
-            # Type Zip: Process as zip code and return 'Z' + cluster value
+            # Type Zip: Process as zip code and return cluster value
             q = qmap[self.disjuncts[0][0].qid]
             try:
                 raw_value = data_row[q.offset]
@@ -114,8 +114,11 @@ class Feature:
                     feature_value = int(raw_value)
                     if q.type == 'Z':  # for zip code, map to cluster
                         zip_code = feature_value
-                        cluster = zip_dict[zip_code]  # get zip cluster
-                        feature_value = cluster  
+                        zip_data = zip_dict.get(zip_code)
+                        if zip_data:
+                            feature_value = zip_data['cluster']
+                        else:
+                            feature_value = np.nan
             except (ValueError, KeyError, IndexError) as e:
                 logger.debug(f"Error processing Zip feature {self.name}: {e}")
                 feature_value = np.nan
@@ -280,8 +283,8 @@ def get_question_map(bucket, parms_key):
                 
     logger.info(f'Question map loaded: {len(question_map)} questions')
     return question_map
-def get_zip_clusters(bucket, zip_key):
-    """Load zip clusters with enhanced error handling using boto3."""
+def get_zip_enhanced_data(bucket, zip_key):
+    """Load zip enhanced data with cluster, census_division, and rural_code."""
     zip_dict = {}
     s3_client = boto3.client('s3')
     
@@ -300,13 +303,19 @@ def get_zip_clusters(bucket, zip_key):
         # Read CSV from string
         zips = pd.read_csv(StringIO(content_str), header=0)
     except Exception as e:
-        logger.error(f"Error loading zip clusters from s3://{bucket}/{zip_key}: {e}")
+        logger.error(f"Error loading zip enhanced data from s3://{bucket}/{zip_key}: {e}")
         raise
     
+    # Expected columns: zip, cluster, census_division, rural_code
     for row in zips.itertuples(index=False):
-        zip_dict[int(row[0])] = int(row[1])
+        zip_code = int(row[0])
+        zip_dict[zip_code] = {
+            'cluster': int(row[1]),
+            'census_division': str(row[2]),
+            'rural_code': str(row[3])
+        }
                 
-    logger.info(f'Zip clusters loaded: {len(zip_dict)} zip codes')
+    logger.info(f'Zip enhanced data loaded: {len(zip_dict)} zip codes')
     return zip_dict
 
 
@@ -366,6 +375,73 @@ def append_features_from_data(features, data_df, question_map, zip_dict, feature
     logger.info(f'Feature processing: {len(successful_features)} successful, {len(failed_features)} failed')
     
     return features
+
+
+def add_zip_enhanced_columns(df, data_df, question_map, zip_dict, feature_list):
+    """
+    Add zip-enhanced columns (cluster, census_division, rural_code) to the dataframe.
+    
+    This function looks for Zip-type features in the feature list and adds three
+    additional columns for each zip code found in the data.
+    """
+    # Find all Zip-type features
+    zip_features = [f for f in feature_list if f.feature_type == 'Zip']
+    
+    if not zip_features:
+        logger.info("No Zip features found, skipping zip-enhanced columns")
+        return df
+    
+    # For each zip feature, extract the zip codes and add enhanced data
+    for zip_feature in zip_features:
+        try:
+            q = question_map[zip_feature.disjuncts[0][0].qid]
+            
+            # Extract zip codes from data
+            zip_codes = []
+            clusters = []
+            census_divisions = []
+            rural_codes = []
+            
+            for i in range(len(data_df)):
+                try:
+                    raw_value = data_df.iloc[i][q.offset]
+                    if raw_value == '' or raw_value == '#NA':
+                        zip_codes.append(np.nan)
+                        clusters.append(np.nan)
+                        census_divisions.append(np.nan)
+                        rural_codes.append(np.nan)
+                    else:
+                        zip_code = int(raw_value)
+                        zip_codes.append(zip_code)
+                        
+                        zip_data = zip_dict.get(zip_code)
+                        if zip_data:
+                            clusters.append(zip_data['cluster'])
+                            census_divisions.append(zip_data['census_division'])
+                            rural_codes.append(zip_data['rural_code'])
+                        else:
+                            clusters.append(np.nan)
+                            census_divisions.append(np.nan)
+                            rural_codes.append(np.nan)
+                except (ValueError, KeyError, IndexError) as e:
+                    logger.debug(f"Error extracting zip data for row {i}: {e}")
+                    zip_codes.append(np.nan)
+                    clusters.append(np.nan)
+                    census_divisions.append(np.nan)
+                    rural_codes.append(np.nan)
+            
+            # Add the three new columns to the dataframe
+            df['zip_cluster'] = clusters
+            df['zip_census_division'] = census_divisions
+            df['zip_rural_code'] = rural_codes
+            
+            logger.info(f"Added zip-enhanced columns: zip_cluster, zip_census_division, zip_rural_code")
+            break  # Only process the first zip feature
+            
+        except Exception as e:
+            logger.error(f"Failed to add zip-enhanced columns: {e}")
+    
+    return df
 
 
 def df_to_s3(df, bucket, key):
@@ -477,8 +553,8 @@ def lambda_handler(event, context):
         logger.info("Loading question map")
         qmap = get_question_map('prosper-raw-data', request_name + '/map_file')
         
-        # Load zip clusters
-        zip_dict = get_zip_clusters('prosper-raw-data', 'Metadata/zip_clusters.csv')
+        # Load zip enhanced data
+        zip_dict = get_zip_enhanced_data('prosper-raw-data', 'Metadata/zip_enhanced.csv')
         
         # Phase 3: Feature Processing
         logger.info("Processing feature lists")
@@ -489,6 +565,9 @@ def lambda_handler(event, context):
         features_df = pd.DataFrame()
         features_df = append_features_from_data(features_df, data_df, qmap, zip_dict, feature_list_objects)
         logger.info(f'Features extracted: {len(features_df.columns)} features')
+        
+        # Add zip-enhanced columns (cluster, census_division, rural_code)
+        features_df = add_zip_enhanced_columns(features_df, data_df, qmap, zip_dict, feature_list_objects)
         
         # Extract labels with partial processing
         label_df = pd.DataFrame()
@@ -569,11 +648,15 @@ def lambda_handler(event, context):
             # Get label names to exclude from feature types
             exclude_labels = [label.name for label in label_list_objects] if label_list_objects else []
             
+            # Add zip-enhanced columns as categorical features
+            extra_categorical_features = ['zip_cluster', 'zip_census_division', 'zip_rural_code']
+            
             feature_types_mapping, feature_types_path = feature_types_generator.generate_and_save_feature_types(
                 feature_list_objects,
                 'prosper-raw-data',
                 request_name,
-                exclude_labels
+                exclude_labels,
+                extra_categorical_features
             )
             
             if feature_types_path:

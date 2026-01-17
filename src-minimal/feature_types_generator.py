@@ -19,13 +19,14 @@ class FeatureTypesGenerator:
     def __init__(self):
         self.s3_client = boto3.client('s3')
     
-    def generate_feature_types_mapping(self, feature_list, exclude_labels=None):
+    def generate_feature_types_mapping(self, feature_list, exclude_labels=None, extra_categorical_features=None):
         """
         Generate feature data type mapping from feature definitions.
         
         Args:
             feature_list (list): List of Feature objects
             exclude_labels (list, optional): List of label names to exclude
+            extra_categorical_features (list, optional): List of additional categorical feature names
             
         Returns:
             dict: Dictionary mapping feature names to data types
@@ -34,6 +35,7 @@ class FeatureTypesGenerator:
             return {}
         
         exclude_labels = exclude_labels or []
+        extra_categorical_features = extra_categorical_features or []
         feature_types = {}
         
         for feature in feature_list:
@@ -47,6 +49,11 @@ class FeatureTypesGenerator:
             
             logger.debug(f"Mapped feature '{feature.name}' "
                         f"({feature.feature_type}) -> {data_type}")
+        
+        # Add extra categorical features
+        for feature_name in extra_categorical_features:
+            feature_types[feature_name] = "categorical"
+            logger.debug(f"Added extra categorical feature '{feature_name}'")
         
         logger.info(f"Generated feature types mapping for "
                    f"{len(feature_types)} features")
@@ -110,7 +117,7 @@ class FeatureTypesGenerator:
             return None
     
     def generate_and_save_feature_types(self, feature_list, bucket, 
-                                       request_name, exclude_labels=None):
+                                       request_name, exclude_labels=None, extra_categorical_features=None):
         """
         Generate feature types mapping and save to S3.
         
@@ -119,6 +126,7 @@ class FeatureTypesGenerator:
             bucket (str): S3 bucket name
             request_name (str): Request name for S3 path
             exclude_labels (list, optional): List of label names to exclude
+            extra_categorical_features (list, optional): List of additional categorical feature names
             
         Returns:
             tuple: (mapping_dict, s3_uri) or (None, None) if failed
@@ -126,7 +134,7 @@ class FeatureTypesGenerator:
         try:
             # Generate the mapping
             mapping = self.generate_feature_types_mapping(
-                feature_list, exclude_labels
+                feature_list, exclude_labels, extra_categorical_features
             )
             
             if not mapping.get("FeatureDataTypes"):
