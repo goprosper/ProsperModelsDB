@@ -30,6 +30,24 @@ git commit --amend -m "Updated message"
 git push
 ```
 
+### Never Create GitHub Actions Workflows Without Permission
+**Situation**: AI assistant creates automated GitHub Actions workflows (CI/CD, validation, testing, etc.) without being asked
+
+**Lesson**: Automated GitHub Actions workflows consume GitHub Actions minutes, can fail due to missing secrets/permissions, and may run unexpectedly (scheduled jobs, on every push, etc.). Users should explicitly request CI/CD automation.
+
+**Solution**:
+- NEVER create `.github/workflows/*.yml` files unless the user explicitly asks for CI/CD, automation, or GitHub Actions
+- If suggesting automation, ask the user first before creating workflow files
+- If a workflow already exists and is causing issues, help disable or delete it when requested
+
+**Example**:
+```bash
+# To disable a workflow, delete the file
+git rm .github/workflows/infrastructure-validation.yml
+git commit -m "Disable infrastructure validation workflow"
+git push
+```
+
 ---
 
 ## MCP Server Configuration
